@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>n8n Outreach Mock Frontend</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./tailwind.output.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar card reveal">
+        <div class="topbar-main">
+          <div>
+            <p class="eyebrow">Frontend Mock</p>
+            <h1>Gmail Sequencer Control Center</h1>
+            <p id="campaign-status-line" class="muted"></p>
+          </div>
+          <div class="topbar-actions">
+            <button id="reset-demo" class="btn btn-soft" type="button">Reset Demo</button>
+          </div>
+        </div>
+        <div id="workflow-strip" class="workflow-strip" aria-live="polite"></div>
+      </header>
+
+      <nav class="screen-nav card reveal" aria-label="Workflow" role="tablist" aria-orientation="horizontal">
+        <button
+          id="tab-audience"
+          class="screen-tab is-active"
+          data-screen="audience"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="screen-audience"
+          tabindex="0"
+        >
+          1 Audience
+        </button>
+        <button
+          id="tab-sequence"
+          class="screen-tab"
+          data-screen="sequence"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="screen-sequence"
+          tabindex="-1"
+        >
+          2 Sequence
+        </button>
+        <button
+          id="tab-approval"
+          class="screen-tab"
+          data-screen="approval"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="screen-approval"
+          tabindex="-1"
+        >
+          3 Campaign Approval
+        </button>
+        <button
+          id="tab-status"
+          class="screen-tab"
+          data-screen="status"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="screen-status"
+          tabindex="-1"
+        >
+          Campaign Status
+        </button>
+      </nav>
+
+      <div id="global-alert" class="reveal" aria-live="polite"></div>
+
+      <main class="screen-wrap reveal">
+        <section
+          id="screen-audience"
+          class="screen is-active"
+          role="tabpanel"
+          aria-labelledby="tab-audience"
+          aria-hidden="false"
+        >
+          <div id="audience-content"></div>
+        </section>
+
+        <section
+          id="screen-sequence"
+          class="screen"
+          role="tabpanel"
+          aria-labelledby="tab-sequence"
+          aria-hidden="true"
+        >
+          <div id="sequence-content"></div>
+        </section>
+
+        <section
+          id="screen-approval"
+          class="screen"
+          role="tabpanel"
+          aria-labelledby="tab-approval"
+          aria-hidden="true"
+        >
+          <div id="approval-content"></div>
+        </section>
+
+        <section
+          id="screen-status"
+          class="screen"
+          role="tabpanel"
+          aria-labelledby="tab-status"
+          aria-hidden="true"
+        >
+          <div id="status-content"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="undo-toast-root" aria-live="polite"></div>
+    <div id="mobile-action-tray" aria-live="polite"></div>
+
+    <script src="./mock-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
