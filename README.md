@@ -1,225 +1,165 @@
-# Campaign Manager Mock Frontend (n8n + Gmail)
+# Email Automation Mock Frontend -> Backend Integration Guide
 
-This project is a static frontend prototype. It currently uses `window.MockData` (from `mock-data.js`) and in-memory state mutations in `app.js`.
+This repository currently runs as a static mock frontend and stores all state in memory.
 
-This README is now an implementation guide for replacing every mock call/state mutation with real backend API calls.
+- Frontend app: `/Users/axi/Documents/email-automation/mock-frontend`
+- Main UI logic: `/Users/axi/Documents/email-automation/mock-frontend/app.js`
+- Mock seed data: `/Users/axi/Documents/email-automation/mock-frontend/mock-data.js`
 
-## Scope
-- Frontend path: `/Users/axi/Documents/email-automation/mock-frontend`
-- Data source today: `/Users/axi/Documents/email-automation/mock-frontend/mock-data.js`
-- Behavior today: local-only in-memory state in `/Users/axi/Documents/email-automation/mock-frontend/app.js`
+This README documents **all frontend areas that still need backend API integration**.
 
-## Current Mock Data Contract (Source of Truth Today)
-`window.MockData` is initialized in `mock-data.js` and consumed in `buildInitialState()`.
+## Current Product Surface
 
-Current object keys:
-- `campaign`
-- `campaigns`
-- `campaignEnrollments`
-- `events`
-- `contacts`
-- `defaultSequence`
-- `timezoneOptions`
+The UI currently exposes:
+1. Audience Setup (contacts + campaign setup)
+2. Sequence
+3. Campaign Approval
+4. Campaigns Hub wizard
+5. Campaigns Hub Step 4 Activity audit log
 
-## Backend Replacement Strategy
-Create a thin API client layer (for example `api.js`) and move all reads/writes out of UI handlers.
+## What Is Still Mocked (Must Move to Backend)
 
-Recommended client responsibilities:
-- Handle auth headers and base URL
-- Normalize response shapes
-- Convert network errors into user-safe messages
-- Provide idempotency key support for write operations
+All items below currently use in-memory state and must call backend APIs.
 
-## Exhaustive List: What Must Be Replaced By Backend API Calls
+### 1) App bootstrap and hydration
+Replace `window.MockData` bootstrap in `buildInitialState()` with API hydration.
 
-### 1) Initial app bootstrap reads
-Replace `window.MockData` ingestion in:
-- `buildInitialState()` (`app.js:66`)
-
-With API calls:
-1. `GET /api/campaigns?include=enrollmentCounts`
-2. `GET /api/campaigns/{campaignId}` for active editing campaign
-3. `GET /api/campaigns/{campaignId}/contacts?eligible=true`
-4. `GET /api/campaigns/{campaignId}/sequence`
-5. `GET /api/timezones`
-6. `GET /api/campaigns/{campaignId}/enrollments`
-7. `GET /api/campaigns/{campaignId}/events?limit=200`
-8. `GET /api/campaigns/{campaignId}/drafts?status=pending,approved,rejected,sent`
-
-### 2) Audience step (contacts + campaign setup)
-#### Reads
-Replace local filters against `state.contacts` in:
-- `getFilteredContacts()` (`app.js:619`)
-- `getVisibleEligibleContacts()` (`app.js:673`)
-
-Use server-side query support:
-- `GET /api/campaigns/{campaignId}/contacts?search=&field=&source=&eligibility=&suppressed=`
-
-#### Writes
-Replace local selection/campaign updates in:
-- `selectAllVisibleEligible()` (`app.js:1094`)
-- `clearVisibleSelection()` (`app.js:1111`)
-- contact toggle branch in `handleChange()` (`app.js:2664`)
-- campaign field branch in `handleInput()` (`app.js:2491`)
-
-With API calls:
-- `PUT /api/campaigns/{campaignId}/audience/selection`
-  - body: `{ contactIds: string[] }`
-- `PATCH /api/campaigns/{campaignId}`
-  - body: `{ name?, timezone?, sendWindowStart?, sendWindowEnd?, startDate? }`
-
-### 3) Sequence builder
-#### Writes
-Replace in-memory sequence changes in:
-- `saveSequence()` (`app.js:1235`)
-- `addStep()` (`app.js:1279`)
-- `removeStep()` (`app.js:1313`)
-- `setStepComposeMode()` (`app.js:1361`)
-- sequence field branch in `handleInput()` (`app.js:2491`)
-
-With API calls:
-- `PUT /api/campaigns/{campaignId}/sequence`
-  - body: `{ steps: SequenceStep[] }`
-- optional granular endpoints if preferred:
-  - `POST /api/campaigns/{campaignId}/sequence/steps`
-  - `PATCH /api/campaigns/{campaignId}/sequence/steps/{stepIndex}`
-  - `DELETE /api/campaigns/{campaignId}/sequence/steps/{stepIndex}`
-
-#### Personalized generation
-Replace deterministic mock generation in:
-- `generatePersonalizedTemplate()` (`app.js:1386`)
-- `buildPersonalizedTemplateFromPrompt()` (`app.js:558`)
-
-With API call:
-- `POST /api/campaigns/{campaignId}/sequence/steps/{stepIndex}/generate`
-  - body: `{ personalizationPrompt: string, previewContactId?: string }`
-  - response: `{ subject: string, body: string, generationMeta: { strategy, model, rewrittenAt, notesSignals[] } }`
-
-### 4) Approval + campaign start
-Replace local approval/start flow in:
-- `confirmStartCampaign()` (`app.js:1159`)
-- `startCampaignFromApproval()` (`app.js:1164`)
-
-With API calls:
-- `POST /api/campaigns/{campaignId}/approve-and-start`
-  - body: `{ approvedBy: string }`
-  - response: `{ campaign, enrollmentsCreated, startedAt }`
-
-### 5) Send cycle + scheduler behavior
-Replace simulated send engine in:
-- `runSendCycle()` (`app.js:1427`)
-- `executeSend()` (`app.js:1048`)
-- `createDraft()` (`app.js:1004`)
-- `getDuePendingDrafts()` (`app.js:1034`)
-
-With backend ownership:
-- `POST /api/campaigns/{campaignId}/run-send-cycle` (manual trigger, admin/testing)
-- production mode should rely on worker/cron queue rather than frontend-triggered sends
-- `GET /api/campaigns/{campaignId}/drafts?due=true`
-
-### 6) Simulation-only controls (for demo/UAT)
-Replace or remove in production:
-- `advanceDay()` (`app.js:1517`)
-- `simulateHumanReply()` (`app.js:1540`)
-- `simulateOOOReply()` (`app.js:1563`)
-
-If kept for test environments only:
-- `POST /api/test/campaigns/{campaignId}/advance-day`
-- `POST /api/test/enrollments/{enrollmentId}/simulate-reply` with `{ type: "human" | "ooo" }`
-
-### 7) Campaign and contact status management
-Replace status changes in:
-- `setCampaignStatus()` (`app.js:1582`)
-- `setContactStatusInCampaign()` (`app.js:1678`)
-- `confirmStatusChange()` (`app.js:1983`)
-
-With API calls:
-- `PATCH /api/campaigns/{campaignId}/status`
-  - body: `{ status: "ACTIVE" | "STOPPED" | "COMPLETED" }`
-- `PATCH /api/campaigns/{campaignId}/enrollments/{enrollmentId}/status`
-  - body: `{ status: "ACTIVE" | "STOPPED" | "COMPLETED" }`
-
-### 8) Draft approval queue actions
-Replace local queue mutations in:
-- `confirmBulkApprovalDue()` (`app.js:1849`)
-- `approveDraft()` (`app.js:1875`)
-- `rejectDraft()` (`app.js:1889`)
-- `regenerateDraft()` (`app.js:1903`)
-
-With API calls:
-- `POST /api/campaigns/{campaignId}/drafts/bulk-approve-due`
-- `PATCH /api/drafts/{draftId}` with `{ approvalStatus: "approved" | "rejected" }`
-- `POST /api/drafts/{draftId}/regenerate`
-
-### 9) Remove / undo / re-add contact from campaign
-Replace local contact safety actions in:
-- `confirmRemoval()` (`app.js:2041`)
-- `undoRemoveContact()` (`app.js:2081`)
-- `readdContact()` (`app.js:2112`)
-
-With API calls:
-- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/remove`
-  - body: `{ reason: string }`
-  - response includes `undoToken` and `undoExpiresAt`
-- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/undo-remove`
-  - body: `{ undoToken: string }`
-- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/readd`
-
-### 10) Campaign status workspace reads
-Replace local campaign/enrollment/event reads in:
-- `selectStatusCampaign()` (`app.js:1790`)
-- KPI/event derivation in:
-  - `getEventsForCampaign()` (`app.js:3625`)
-  - `computeCampaignMetrics()` (`app.js:3647`)
-  - `computeCampaignRecentEvents()` (`app.js:3682`)
-  - `renderKpiSection()` (`app.js:3697`)
-
-With API calls:
+Required reads:
 - `GET /api/campaigns`
-- `GET /api/campaigns/{campaignId}/enrollments?status=`
-- `GET /api/campaigns/{campaignId}/metrics`
-- `GET /api/campaigns/{campaignId}/events?limit=20`
-
-## Recommended API Surface (Consolidated)
-
-### Campaigns
-- `GET /api/campaigns`
-- `POST /api/campaigns`
-- `GET /api/campaigns/{campaignId}`
-- `PATCH /api/campaigns/{campaignId}`
-- `PATCH /api/campaigns/{campaignId}/status`
-- `POST /api/campaigns/{campaignId}/approve-and-start`
-
-### Audience / Contacts
+- `GET /api/campaigns/{campaignId}` (active editable campaign)
 - `GET /api/campaigns/{campaignId}/contacts`
-- `PUT /api/campaigns/{campaignId}/audience/selection`
-
-### Sequence
 - `GET /api/campaigns/{campaignId}/sequence`
-- `PUT /api/campaigns/{campaignId}/sequence`
-- `POST /api/campaigns/{campaignId}/sequence/steps/{stepIndex}/generate`
-
-### Enrollments
 - `GET /api/campaigns/{campaignId}/enrollments`
-- `PATCH /api/campaigns/{campaignId}/enrollments/{enrollmentId}/status`
-- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/remove`
-- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/undo-remove`
-- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/readd`
-
-### Drafts
 - `GET /api/campaigns/{campaignId}/drafts`
-- `PATCH /api/drafts/{draftId}`
-- `POST /api/drafts/{draftId}/regenerate`
-- `POST /api/campaigns/{campaignId}/drafts/bulk-approve-due`
-
-### Events & Metrics
 - `GET /api/campaigns/{campaignId}/events`
-- `GET /api/campaigns/{campaignId}/metrics`
-
-### Timezone metadata
 - `GET /api/timezones`
 
-## Required Backend Domain Entities
+### 2) Audience Setup
+#### Reads
+Contact table currently filters in JS. Move filtering/searching to backend query params.
+
+Required read:
+- `GET /api/campaigns/{campaignId}/contacts?search=&field=&source=&status=`
+
+#### Writes
+Audience contact selection and campaign setup fields are currently local mutations.
+
+Required writes:
+- `PUT /api/campaigns/{campaignId}/audience/selection`
+  - body: `{ "contactIds": ["ct_001", "ct_002"] }`
+- `PATCH /api/campaigns/{campaignId}`
+  - body: `{ "name": "...", "timezone": "...", "sendWindowStart": "09:00", "sendWindowEnd": "17:00", "startDate": "YYYY-MM-DD" }`
+
+### 3) Sequence
+#### Reads
+- `GET /api/campaigns/{campaignId}/sequence`
+
+#### Writes
+Sequence step add/remove/edit/save/personalization are still mock-only.
+
+Required writes:
+- `PUT /api/campaigns/{campaignId}/sequence`
+- `POST /api/campaigns/{campaignId}/sequence/steps/{stepIndex}/generate`
+  - body: `{ "personalizationPrompt": "...", "previewContactId": "ct_001" }`
+
+### 4) Campaign Approval / Start
+Approval and start are local-only today.
+
+Required write:
+- `POST /api/campaigns/{campaignId}/approve-and-start`
+  - body: `{ "approvedBy": "user_id_or_email" }`
+
+### 5) Send-cycle and scheduler behaviors
+The frontend simulates send-cycle behavior and progression. This must be backend-owned.
+
+Required write/read:
+- `POST /api/campaigns/{campaignId}/run-send-cycle` (manual admin trigger only)
+- `GET /api/campaigns/{campaignId}/drafts?due=true`
+
+Production note: scheduling/sending should run in backend workers/cron, not browser.
+
+### 6) Campaigns Hub (guided wizard)
+Campaign and enrollment records are currently read from local state.
+
+Required reads:
+- `GET /api/campaigns`
+- `GET /api/campaigns/{campaignId}/enrollments?status=all|active|stopped`
+- `GET /api/campaigns/{campaignId}/metrics`
+
+Required writes:
+- `PATCH /api/campaigns/{campaignId}/status`
+  - allowed: `ACTIVE | STOPPED | COMPLETED`
+- `PATCH /api/campaigns/{campaignId}/enrollments/{enrollmentId}/status`
+  - allowed in current UI: `ACTIVE | STOPPED`
+
+### 7) Contact safety controls (remove / undo / re-add)
+These are local-only right now.
+
+Required writes:
+- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/remove`
+- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/undo-remove`
+- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/readd`
+
+### 8) Draft approval queue
+Bulk approve/reject/regenerate is local-only.
+
+Required writes:
+- `POST /api/campaigns/{campaignId}/drafts/bulk-approve-due`
+- `PATCH /api/drafts/{draftId}`
+  - body: `{ "approvalStatus": "approved" | "rejected" }`
+- `POST /api/drafts/{draftId}/regenerate`
+
+### 9) Activity audit log (Campaigns Hub Step 4)
+Activity table (Name, Email, Last action, Message, Step, Time) currently reads from local events.
+
+Required reads:
+- `GET /api/campaigns/{campaignId}/events?type=&sortBy=&sortDir=&page=&pageSize=`
+
+The backend should provide enough data to render:
+- contact name
+- contact email
+- action type
+- message
+- step index
+- timestamp
+
+## Shared Pagination Requirements (Already Implemented in UI)
+
+The frontend now uses a shared pagination model for:
+- Audience contacts table
+- Campaigns Hub Step 2 contacts table
+
+Backend implications:
+- Support `page` and `pageSize` with defaults compatible with UI (`25`, options `25|50|100`)
+- Return totals so UI can show `X-Y of Z items`
+
+Recommended response shape for list endpoints:
+```json
+{
+  "items": [],
+  "page": 1,
+  "pageSize": 25,
+  "totalItems": 0,
+  "totalPages": 1
+}
+```
+
+## Event Types Expected by UI
+
+Current UI event handling expects these types (or equivalent canonical mapping):
+- `send`
+- `qualifying_reply`
+- `ooo_reply`
+- `campaign_status_changed`
+- `contact_status_changed`
+- `removed`
+- `undo_remove`
+- `readded`
+- `bulk_approve`
+- `status_campaign_switched`
+
+## Minimal Domain Model Needed in Backend
+
 - `Campaign`
 - `Contact`
 - `CampaignEnrollment` (campaign-scoped contact state)
@@ -227,76 +167,37 @@ With API calls:
 - `DraftApprovalItem`
 - `CampaignEvent`
 
-## Minimum Response Shape Expectations
+## Security and Reliability Requirements
 
-### Campaign
-```json
-{
-  "id": "cmp_001",
-  "name": "Q2 Pipeline Expansion",
-  "timezone": "Europe/Madrid",
-  "sendWindowStart": "09:00",
-  "sendWindowEnd": "17:00",
-  "startDate": "2026-03-02",
-  "status": "DRAFT",
-  "startedAt": null
-}
+- All write endpoints must be authenticated.
+- All write endpoints must be audited (`actor`, `timestamp`, `before`, `after`).
+- Send-cycle operations must be idempotent (idempotency key support recommended).
+- Frontend must not be source of truth for status progression or send scheduling.
+
+## Suggested Integration Order
+
+1. Bootstrap read APIs (campaign, contacts, sequence, enrollments, drafts, events)
+2. Audience + campaign setup writes
+3. Sequence save/generate
+4. Approval/start
+5. Campaigns Hub status writes
+6. Activity endpoint + server-side pagination/sort/filter
+7. Remove `mock-data.js` and mock fallback paths
+
+## Local Run (Current Mock Mode)
+
+From `/Users/axi/Documents/email-automation/mock-frontend`:
+
+```bash
+npm run dev
 ```
 
-### Enrollment
-```json
-{
-  "id": "enr_001",
-  "campaignId": "cmp_001",
-  "contactId": "ct_001",
-  "status": "ACTIVE",
-  "currentStep": 1,
-  "nextSendDay": 0,
-  "nextSendAt": "2026-03-02T09:00:00.000Z",
-  "gmailThreadId": "thread_ct_001",
-  "threadState": "Not sent yet",
-  "lastSentStep": 0,
-  "removedReason": null,
-  "removedBy": null,
-  "removedAt": null
-}
-```
+or open `index.html` directly for static preview.
 
-### Draft
-```json
-{
-  "id": "drf_001",
-  "enrollmentId": "enr_001",
-  "contactId": "ct_001",
-  "stepIndex": 1,
-  "sourceMode": "generic",
-  "isStale": false,
-  "subjectDraft": "Quick idea for Acme",
-  "bodyDraft": "Hi ...",
-  "approvalStatus": "pending",
-  "createdAt": "2026-03-02T09:00:00.000Z",
-  "updatedAt": "2026-03-02T09:00:00.000Z"
-}
-```
+## Done Criteria for Backend Migration
 
-## Frontend Refactor Checklist
-1. Add `api.js` and centralize all HTTP requests.
-2. Replace `window.MockData` bootstrap with `Promise.all` API bootstrap reads.
-3. Replace every mutation function listed above to call backend first, then update UI from response.
-4. Remove direct event synthesis via `recordEvent()` from frontend; event creation should come from backend side effects.
-5. Keep UI-only state local (`expanded panels`, `selected tab`, `modal open/closed`).
-6. Add loading and retry states for each async action.
-7. Add optimistic updates only for low-risk actions (filters/tabs), not for destructive actions (remove/status changes).
-
-## Production Rules
-- Frontend must never send email directly.
-- Frontend must never be source of truth for campaign status transitions.
-- Send scheduling and progression must be backend-controlled and idempotent.
-- Every write endpoint should be authenticated and audited (`actor`, timestamp, change set).
-
-## Local Run (Current Mock)
-1. Open `/Users/axi/Documents/email-automation/mock-frontend/index.html` in a browser.
-2. No backend is required for current mock mode.
-
-## Known Gap After Backend Integration
-When you migrate fully to backend APIs, remove `mock-data.js` script inclusion from `index.html` and delete all fallback behavior in `buildInitialState()` that assumes `window.MockData`.
+Migration is complete when:
+1. `app.js` no longer relies on `window.MockData`.
+2. No business mutation is performed in-memory without API roundtrip.
+3. Activity, contacts, enrollments, drafts, and metrics are fetched from backend.
+4. `mock-data.js` script import is removed from `index.html`.

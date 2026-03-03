@@ -23,7 +23,7 @@
     { id: "sequence", label: "Sequence" },
     { id: "approval", label: "Campaign Approval" }
   ];
-  var STATUS_SCREEN = { id: "status", label: "Campaign Status" };
+  var STATUS_SCREEN = { id: "status", label: "Campaigns Hub" };
 
   var lastFocusedElement = null;
   var removeUndoTimer = null;
@@ -121,13 +121,18 @@
           sequence: "locked",
           approval: "locked"
         },
-        sourceFilters: [],
         sourceSearch: "",
         isContactFilterMenuOpen: false,
         contactFilterField: "name",
         contactFilterValue: "",
         contactFilterSource: "",
         contactFilterStatus: "",
+        audienceContactsPage: 1,
+        audienceContactsPageSize: 25,
+        audienceContactsPageSizeOptions: [25, 50, 100],
+        hubContactsPage: 1,
+        hubContactsPageSize: 25,
+        hubContactsPageSizeOptions: [25, 50, 100],
         selectVisibleState: "none",
         audienceSubStep: 1,
         audienceCollapsed: {
@@ -150,6 +155,18 @@
         isCampaignDirectoryCollapsed: false,
         selectedStatusCampaignId: null,
         statusJourneyStep: 1,
+        statusJourneyVisited: {
+          1: true,
+          2: false,
+          3: false,
+          4: false
+        },
+        activityFilterAction: "all",
+        activitySortBy: "time",
+        activitySortDir: "desc",
+        activityPage: 1,
+        activityPageSize: 50,
+        activityPageSizeOptions: [25, 50, 100],
         statusViewMode: "review",
         bulkActionConfirmOpen: false,
         campaignApproval: {
@@ -215,6 +232,25 @@
 
   function reasonHint(reason) {
     return reason ? '<p class="action-note">' + escapeHtml(reason) + "</p>" : "";
+  }
+
+  function paginateRows(rows, page, pageSize) {
+    var safeRows = Array.isArray(rows) ? rows : [];
+    var safePageSize = Math.max(1, Number(pageSize || 25));
+    var totalItems = safeRows.length;
+    var totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
+    var currentPage = Math.min(totalPages, Math.max(1, Number(page || 1)));
+    var start = (currentPage - 1) * safePageSize;
+    var end = Math.min(start + safePageSize, totalItems);
+
+    return {
+      pageRows: safeRows.slice(start, end),
+      totalItems: totalItems,
+      totalPages: totalPages,
+      currentPage: currentPage,
+      startIndex: totalItems ? start + 1 : 0,
+      endIndex: end
+    };
   }
 
   function isEditableElement(element) {
@@ -427,6 +463,10 @@
       return status;
     }
     return STATUS.STOPPED;
+  }
+
+  function getContactOperationalStatus(status) {
+    return status === STATUS.ACTIVE ? STATUS.ACTIVE : STATUS.STOPPED;
   }
 
   function parseSendWindowHour() {
@@ -1074,23 +1114,6 @@
     }
   }
 
-  function toggleSourceFilter(source) {
-    if (isCampaignSetupLocked()) {
-      setNotice("error", "Campaign has started; audience setup is locked.");
-      render();
-      return;
-    }
-
-    var index = state.ui.sourceFilters.indexOf(source);
-    if (index === -1) {
-      state.ui.sourceFilters.push(source);
-    } else {
-      state.ui.sourceFilters.splice(index, 1);
-    }
-
-    renderAudience();
-  }
-
   function selectAllVisibleEligible() {
     if (isCampaignSetupLocked()) {
       setNotice("error", "Campaign has started; audience setup is locked.");
@@ -1138,7 +1161,7 @@
       setNotice(
         "alert",
         state.campaign.status === STATUS.STOPPED
-          ? "Campaign is stopped. Resume it from Campaign Status."
+          ? "Campaign is stopped. Resume it from Campaigns Hub."
           : "Campaign is already active."
       );
       render();
@@ -1172,7 +1195,7 @@
       setNotice(
         "alert",
         state.campaign.status === STATUS.STOPPED
-          ? "Campaign is stopped. Resume it from Campaign Status."
+          ? "Campaign is stopped. Resume it from Campaigns Hub."
           : "Campaign is already active."
       );
       render();
@@ -1221,6 +1244,12 @@
     state.campaignEnrollments[state.campaign.id] = deepClone(state.enrollments);
     state.ui.selectedStatusCampaignId = null;
     state.ui.statusJourneyStep = 1;
+    resetStatusJourneyVisited();
+    state.ui.activityFilterAction = "all";
+    state.ui.activitySortBy = "time";
+    state.ui.activitySortDir = "desc";
+    state.ui.activityPage = 1;
+    state.ui.activityPageSize = 50;
 
     state.events = [];
     state.draftApprovalItems = [];
@@ -1779,12 +1808,22 @@
 
   function setStatusFilter(value) {
     state.ui.statusFilter = value;
+    state.ui.hubContactsPage = 1;
     renderStatus();
   }
 
   function toggleCampaignDirectoryCollapsed() {
     state.ui.isCampaignDirectoryCollapsed = !state.ui.isCampaignDirectoryCollapsed;
     renderStatus();
+  }
+
+  function resetStatusJourneyVisited() {
+    state.ui.statusJourneyVisited = {
+      1: true,
+      2: false,
+      3: false,
+      4: false
+    };
   }
 
   function selectStatusCampaign(campaignId) {
@@ -1796,8 +1835,12 @@
 
     var previousCampaignId = state.ui.selectedStatusCampaignId;
     state.ui.selectedStatusCampaignId = campaignId;
+    resetStatusJourneyVisited();
     state.ui.statusJourneyStep = 2;
+    state.ui.statusJourneyVisited[2] = true;
     state.ui.statusFilter = "all";
+    state.ui.hubContactsPage = 1;
+    state.ui.activityPage = 1;
     state.ui.isCampaignDirectoryCollapsed = true;
     syncStatusViewMode();
     if (previousCampaignId !== campaignId) {
@@ -1821,18 +1864,34 @@
     if (nextStep < 1) {
       nextStep = 1;
     }
-    if (nextStep > 3) {
-      nextStep = 3;
+    if (nextStep > 4) {
+      nextStep = 4;
     }
     if (nextStep > 1 && !state.ui.selectedStatusCampaignId) {
       setNotice("error", "Select a campaign first.");
       render();
       return;
     }
+    if (nextStep === 3 && !(state.ui.statusJourneyVisited && state.ui.statusJourneyVisited[2])) {
+      setNotice("error", "Complete Step 2 before reviewing KPIs.");
+      render();
+      return;
+    }
+    if (nextStep === 4 && !(state.ui.statusJourneyVisited && state.ui.statusJourneyVisited[3])) {
+      setNotice("error", "Complete Step 3 before reviewing activity.");
+      render();
+      return;
+    }
     if (nextStep > 1) {
       state.ui.isCampaignDirectoryCollapsed = true;
+    } else {
+      state.ui.isCampaignDirectoryCollapsed = false;
     }
     state.ui.statusJourneyStep = nextStep;
+    if (!state.ui.statusJourneyVisited || typeof state.ui.statusJourneyVisited !== "object") {
+      resetStatusJourneyVisited();
+    }
+    state.ui.statusJourneyVisited[nextStep] = true;
     renderStatus();
   }
 
@@ -2322,9 +2381,11 @@
     var enrollmentId = actionEl.getAttribute("data-enrollment-id");
     var draftId = actionEl.getAttribute("data-draft-id");
     var filterValue = actionEl.getAttribute("data-filter");
-    var source = actionEl.getAttribute("data-source");
     var stepTarget = actionEl.getAttribute("data-step-target");
     var campaignId = actionEl.getAttribute("data-campaign-id");
+    var statusStepTarget = Number(actionEl.getAttribute("data-step"));
+    var activitySortBy = actionEl.getAttribute("data-sort-by");
+    var activityPageTarget = Number(actionEl.getAttribute("data-page"));
     var actionHandlers = {
       "go-step": function goStep() {
         activateScreen(stepTarget, true);
@@ -2356,9 +2417,6 @@
       "continue-to-approval": function continueToApproval() {
         goNextFrom("sequence");
       },
-      "toggle-source": function toggleSource() {
-        toggleSourceFilter(source);
-      },
       "select-all-visible": function selectAllVisible() {
         selectAllVisibleEligible();
       },
@@ -2371,6 +2429,7 @@
         state.ui.contactFilterSource = "";
         state.ui.contactFilterStatus = "";
         state.ui.sourceSearch = "";
+        state.ui.audienceContactsPage = 1;
         state.ui.isContactFilterMenuOpen = false;
         renderAudience();
       },
@@ -2431,6 +2490,69 @@
       },
       "status-prev-step": function statusPrevStepAction() {
         setStatusJourneyStep((state.ui.statusJourneyStep || 1) - 1);
+      },
+      "status-go-all-campaigns": function statusGoAllCampaignsAction() {
+        state.activeScreen = "status";
+        state.ui.selectedStatusCampaignId = null;
+        resetStatusJourneyVisited();
+        state.ui.statusJourneyStep = 1;
+        state.ui.statusFilter = "all";
+        state.ui.hubContactsPage = 1;
+        state.ui.isCampaignDirectoryCollapsed = false;
+        state.ui.activityPage = 1;
+        syncStatusViewMode();
+        renderStatus();
+      },
+      "status-go-step": function statusGoStepAction() {
+        if (!Number.isFinite(statusStepTarget)) {
+          return;
+        }
+        setStatusJourneyStep(statusStepTarget);
+      },
+      "set-activity-sort": function setActivitySortAction() {
+        var nextSortBy = String(activitySortBy || "").trim();
+        if (!nextSortBy) {
+          return;
+        }
+        if (state.ui.activitySortBy === nextSortBy) {
+          state.ui.activitySortDir = state.ui.activitySortDir === "asc" ? "desc" : "asc";
+        } else {
+          state.ui.activitySortBy = nextSortBy;
+          state.ui.activitySortDir = nextSortBy === "time" ? "desc" : "asc";
+        }
+        state.ui.activityPage = 1;
+        renderStatus();
+      },
+      "activity-prev-page": function activityPrevPageAction() {
+        state.ui.activityPage = Math.max(1, Number(state.ui.activityPage || 1) - 1);
+        renderStatus();
+      },
+      "activity-next-page": function activityNextPageAction() {
+        state.ui.activityPage = Math.max(1, Number(state.ui.activityPage || 1) + 1);
+        renderStatus();
+      },
+      "activity-go-page": function activityGoPageAction() {
+        if (!Number.isFinite(activityPageTarget)) {
+          return;
+        }
+        state.ui.activityPage = Math.max(1, Math.trunc(activityPageTarget));
+        renderStatus();
+      },
+      "audience-prev-page": function audiencePrevPageAction() {
+        state.ui.audienceContactsPage = Math.max(1, Number(state.ui.audienceContactsPage || 1) - 1);
+        renderAudience();
+      },
+      "audience-next-page": function audienceNextPageAction() {
+        state.ui.audienceContactsPage = Math.max(1, Number(state.ui.audienceContactsPage || 1) + 1);
+        renderAudience();
+      },
+      "hub-prev-page": function hubPrevPageAction() {
+        state.ui.hubContactsPage = Math.max(1, Number(state.ui.hubContactsPage || 1) - 1);
+        renderStatus();
+      },
+      "hub-next-page": function hubNextPageAction() {
+        state.ui.hubContactsPage = Math.max(1, Number(state.ui.hubContactsPage || 1) + 1);
+        renderStatus();
       },
       "open-bulk-approve": function openBulkApproveAction() {
         openBulkApprovalConfirm();
@@ -2512,12 +2634,14 @@
 
     if (target.matches("[data-contact-filter-value]")) {
       state.ui.contactFilterValue = target.value;
+      state.ui.audienceContactsPage = 1;
       renderAudience();
       return;
     }
 
     if (target.matches("[data-contact-global-search]")) {
       state.ui.sourceSearch = target.value;
+      state.ui.audienceContactsPage = 1;
       renderAudience();
       return;
     }
@@ -2579,19 +2703,60 @@
       state.ui.contactFilterValue = "";
       state.ui.contactFilterSource = "";
       state.ui.contactFilterStatus = "";
+      state.ui.audienceContactsPage = 1;
       renderAudience();
       return;
     }
 
     if (target.matches("[data-contact-filter-source]")) {
       state.ui.contactFilterSource = target.value || "";
+      state.ui.audienceContactsPage = 1;
       renderAudience();
       return;
     }
 
     if (target.matches("[data-contact-filter-status]")) {
       state.ui.contactFilterStatus = target.value || "";
+      state.ui.audienceContactsPage = 1;
       renderAudience();
+      return;
+    }
+
+    if (target.matches("[data-audience-page-size]")) {
+      var audiencePageSize = Number(target.value);
+      if (Number.isFinite(audiencePageSize) && audiencePageSize > 0) {
+        state.ui.audienceContactsPageSize = Math.trunc(audiencePageSize);
+      }
+      state.ui.audienceContactsPage = 1;
+      renderAudience();
+      return;
+    }
+
+    if (target.matches("[data-audience-page]")) {
+      var audiencePage = Number(target.value);
+      if (Number.isFinite(audiencePage) && audiencePage > 0) {
+        state.ui.audienceContactsPage = Math.trunc(audiencePage);
+      }
+      renderAudience();
+      return;
+    }
+
+    if (target.matches("[data-hub-page-size]")) {
+      var hubPageSize = Number(target.value);
+      if (Number.isFinite(hubPageSize) && hubPageSize > 0) {
+        state.ui.hubContactsPageSize = Math.trunc(hubPageSize);
+      }
+      state.ui.hubContactsPage = 1;
+      renderStatus();
+      return;
+    }
+
+    if (target.matches("[data-hub-page]")) {
+      var hubPage = Number(target.value);
+      if (Number.isFinite(hubPage) && hubPage > 0) {
+        state.ui.hubContactsPage = Math.trunc(hubPage);
+      }
+      renderStatus();
       return;
     }
 
@@ -2625,7 +2790,7 @@
         if (!enrollment || !selected) {
           return;
         }
-        var currentContactStatus = getOperationalStatus(enrollment.status);
+        var currentContactStatus = getContactOperationalStatus(enrollment.status);
         if (currentContactStatus === selected) {
           return;
         }
@@ -2655,6 +2820,32 @@
       state.ui.sequencePreview.exampleContactIdByStep[stepId] = contactId;
       renderExamplePreview(stepId, contactId);
       renderSequence();
+      return;
+    }
+
+    if (target.matches("[data-activity-filter]")) {
+      state.ui.activityFilterAction = target.value || "all";
+      state.ui.activityPage = 1;
+      renderStatus();
+      return;
+    }
+
+    if (target.matches("[data-activity-page-size]")) {
+      var size = Number(target.value);
+      if (Number.isFinite(size) && size > 0) {
+        state.ui.activityPageSize = Math.trunc(size);
+      }
+      state.ui.activityPage = 1;
+      renderStatus();
+      return;
+    }
+
+    if (target.matches("[data-activity-page]")) {
+      var page = Number(target.value);
+      if (Number.isFinite(page) && page > 0) {
+        state.ui.activityPage = Math.trunc(page);
+      }
+      renderStatus();
       return;
     }
 
@@ -2857,7 +3048,7 @@
         : "Fix sequence validation errors.";
     } else if (state.activeScreen === "approval") {
       nextAction = isCampaignManageableStatus(state.campaign.status)
-        ? "Review in Campaign Status."
+        ? "Review in Campaigns Hub."
         : "Approve and start campaign.";
     } else if (state.activeScreen === "status") {
       nextAction = "Review campaigns and contact status.";
@@ -2915,6 +3106,8 @@
     var selectedVisibleEligible = visibleEligible.filter(function selected(contact) {
       return !!state.selectedContactIds[contact.id];
     }).length;
+    var audiencePaged = paginateRows(filtered, state.ui.audienceContactsPage, state.ui.audienceContactsPageSize);
+    state.ui.audienceContactsPage = audiencePaged.currentPage;
 
     var stepper =
       '<section class="panel stack audience-stepper-shell">' +
@@ -2940,7 +3133,7 @@
     }
     sourceOptions.sort();
 
-    var contactRows = filtered
+    var contactRows = audiencePaged.pageRows
       .map(function row(contact) {
         var checked = state.selectedContactIds[contact.id] ? " checked" : "";
         var disabled = !contact.eligible || contact.suppressed || isCampaignSetupLocked() ? " disabled" : "";
@@ -2983,6 +3176,17 @@
         );
       })
       .join("");
+
+    var contactsPager = renderContactsPager({
+      scope: "audience",
+      currentPage: audiencePaged.currentPage,
+      totalPages: audiencePaged.totalPages,
+      startIndex: audiencePaged.startIndex,
+      endIndex: audiencePaged.endIndex,
+      totalItems: audiencePaged.totalItems,
+      pageSize: Number(state.ui.audienceContactsPageSize || 25),
+      pageSizeOptions: state.ui.audienceContactsPageSizeOptions || [25, 50, 100]
+    });
 
     var contactsSummaryCard =
       '<section class="panel stack audience-summary-card">' +
@@ -3098,6 +3302,7 @@
       '<div class="table-wrap audience-contacts-table"><table><thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Source</th><th>Status</th><th>Notes</th></tr></thead><tbody>' +
       (contactRows || '<tr><td colspan="6" class="helper">No contacts match current filters.</td></tr>') +
       "</tbody></table></div>" +
+      contactsPager +
       '<div class="step-footer">' +
       '<button class="btn btn-primary" type="button" data-action="audience-next-substep"' +
       disabledAttr(canStep1Continue ? "" : "Select at least one eligible contact to continue.") +
@@ -3396,7 +3601,7 @@
     } else if (isCampaignSetupLocked()) {
       startReason =
         state.campaign.status === STATUS.STOPPED
-          ? "Campaign is stopped. Resume it in Campaign Status."
+          ? "Campaign is stopped. Resume it in Campaigns Hub."
           : "Campaign is already active.";
     }
 
@@ -3679,9 +3884,311 @@
     };
   }
 
-  function computeCampaignRecentEvents(campaignId, limit) {
-    var max = Number.isFinite(limit) ? limit : 12;
-    return getEventsForCampaign(campaignId).slice(0, max);
+  function humanizeEventType(type) {
+    var key = String(type || "").trim();
+    var labels = {
+      send: "Email sent",
+      qualifying_reply: "Qualifying reply",
+      ooo_reply: "Out-of-office reply",
+      campaign_status_changed: "Campaign status changed",
+      contact_status_changed: "Contact status changed",
+      removed: "Contact removed",
+      undo_remove: "Removal undone",
+      readded: "Contact re-added",
+      bulk_approve: "Bulk approval",
+      status_campaign_switched: "Campaign selected"
+    };
+    if (labels[key]) {
+      return labels[key];
+    }
+    return key ? key.replace(/_/g, " ") : "Activity";
+  }
+
+  function buildActivityMessage(eventItem, contactName) {
+    var name = contactName || "Contact";
+    var type = String((eventItem && eventItem.type) || "");
+    var meta = (eventItem && eventItem.meta) || {};
+    if (type === "send") {
+      return "Email sent to " + name + ".";
+    }
+    if (type === "qualifying_reply") {
+      return "Qualifying reply received from " + name + ".";
+    }
+    if (type === "ooo_reply") {
+      return "Out-of-office reply received from " + name + ".";
+    }
+    if (type === "campaign_status_changed") {
+      return "Campaign status changed: " + String(meta.fromStatus || "-") + " -> " + String(meta.toStatus || "-") + ".";
+    }
+    if (type === "contact_status_changed") {
+      return "Contact status changed: " + String(meta.fromStatus || "-") + " -> " + String(meta.toStatus || "-") + ".";
+    }
+    if (type === "removed") {
+      return "Contact removed from campaign." + (meta.reason ? " Reason: " + meta.reason + "." : "");
+    }
+    if (type === "undo_remove") {
+      return "Removal undone and contact restored.";
+    }
+    if (type === "readded") {
+      return "Contact re-added to campaign sequence.";
+    }
+    if (type === "bulk_approve") {
+      return "Bulk approved " + String(meta.count || 0) + " draft(s).";
+    }
+    if (type === "status_campaign_switched") {
+      return "Switched view to selected campaign.";
+    }
+    return humanizeEventType(type) + ".";
+  }
+
+  function buildActivityRows(campaignId) {
+    if (!campaignId) {
+      return [];
+    }
+    return getEventsForCampaign(campaignId).map(function toRow(eventItem, index) {
+      var contact = eventItem.contactId ? getContact(eventItem.contactId) : null;
+      var contactName = contact ? contact.name : "System";
+      var contactEmail = contact ? String(contact.email || "-") : "-";
+      var stepLabel = Number.isFinite(Number(eventItem.stepIndex)) ? "Step " + String(eventItem.stepIndex) : "-";
+      return {
+        id: eventItem.id || "event_" + String(index),
+        eventType: String(eventItem.type || ""),
+        name: contactName,
+        email: contactEmail,
+        lastAction: humanizeEventType(eventItem.type),
+        message: buildActivityMessage(eventItem, contactName),
+        stepLabel: stepLabel,
+        stepValue: Number.isFinite(Number(eventItem.stepIndex)) ? Number(eventItem.stepIndex) : 0,
+        timeIso: eventItem.timestamp || null,
+        timeLabel: toLocaleLabel(eventItem.timestamp)
+      };
+    });
+  }
+
+  function filterActivityRows(rows) {
+    var filter = String(state.ui.activityFilterAction || "all");
+    if (filter === "all") {
+      return rows;
+    }
+    return rows.filter(function byFilter(row) {
+      return row.eventType === filter;
+    });
+  }
+
+  function sortActivityRows(rows) {
+    var sortBy = String(state.ui.activitySortBy || "time");
+    var dir = String(state.ui.activitySortDir || "desc") === "asc" ? 1 : -1;
+    return rows.slice().sort(function bySort(a, b) {
+      if (sortBy === "name") {
+        return a.name.localeCompare(b.name) * dir;
+      }
+      if (sortBy === "lastAction") {
+        return a.lastAction.localeCompare(b.lastAction) * dir;
+      }
+      if (sortBy === "step") {
+        return (a.stepValue - b.stepValue) * dir;
+      }
+      var aTime = a.timeIso ? new Date(a.timeIso).getTime() : 0;
+      var bTime = b.timeIso ? new Date(b.timeIso).getTime() : 0;
+      return (aTime - bTime) * dir;
+    });
+  }
+
+  function paginateActivityRows(rows) {
+    var pageSize = Math.max(1, Number(state.ui.activityPageSize || 50));
+    var totalItems = rows.length;
+    var totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    var currentPage = Math.min(totalPages, Math.max(1, Number(state.ui.activityPage || 1)));
+    state.ui.activityPage = currentPage;
+    var startIndex = (currentPage - 1) * pageSize;
+    var endIndexExclusive = Math.min(startIndex + pageSize, totalItems);
+    return {
+      pageRows: rows.slice(startIndex, endIndexExclusive),
+      totalItems: totalItems,
+      totalPages: totalPages,
+      currentPage: currentPage,
+      startIndex: totalItems ? startIndex + 1 : 0,
+      endIndex: endIndexExclusive
+    };
+  }
+
+  function renderContactsPager(opts) {
+    var scope = opts && opts.scope === "hub" ? "hub" : "audience";
+    var currentPage = Math.max(1, Number((opts && opts.currentPage) || 1));
+    var totalPages = Math.max(1, Number((opts && opts.totalPages) || 1));
+    var pageSize = Math.max(1, Number((opts && opts.pageSize) || 25));
+    var pageSizeOptions = opts && Array.isArray(opts.pageSizeOptions) ? opts.pageSizeOptions : [25, 50, 100];
+    var startIndex = Number((opts && opts.startIndex) || 0);
+    var endIndex = Number((opts && opts.endIndex) || 0);
+    var totalItems = Number((opts && opts.totalItems) || 0);
+    var prevAction = scope === "hub" ? "hub-prev-page" : "audience-prev-page";
+    var nextAction = scope === "hub" ? "hub-next-page" : "audience-next-page";
+    var pageSizeAttr = scope === "hub" ? "data-hub-page-size" : "data-audience-page-size";
+    var pageAttr = scope === "hub" ? "data-hub-page" : "data-audience-page";
+    var pageOptions = Array.from({ length: totalPages }, function map(_, idx) {
+      var page = idx + 1;
+      return '<option value="' + page + '"' + (page === currentPage ? " selected" : "") + ">" + page + "</option>";
+    }).join("");
+
+    return (
+      '<div class="contacts-pager">' +
+      '<div class="contacts-pager-left">' +
+      '<label class="helper" for="' +
+      scope +
+      '-contacts-page-size">Items per page</label>' +
+      '<select id="' +
+      scope +
+      '-contacts-page-size" class="status-select" ' +
+      pageSizeAttr +
+      ">" +
+      pageSizeOptions
+        .map(function option(size) {
+          return '<option value="' + size + '"' + (Number(size) === pageSize ? " selected" : "") + ">" + size + "</option>";
+        })
+        .join("") +
+      "</select>" +
+      '<span class="helper">' +
+      startIndex +
+      "-" +
+      endIndex +
+      " of " +
+      totalItems +
+      " items</span>" +
+      "</div>" +
+      '<div class="contacts-pager-right">' +
+      '<button class="btn btn-secondary" type="button" data-action="' +
+      prevAction +
+      '"' +
+      disabledAttr(currentPage <= 1 ? "First page" : "") +
+      ">Prev</button>" +
+      '<select class="status-select" ' +
+      pageAttr +
+      ">" +
+      pageOptions +
+      "</select>" +
+      '<span class="helper">of ' +
+      totalPages +
+      "</span>" +
+      '<button class="btn btn-secondary" type="button" data-action="' +
+      nextAction +
+      '"' +
+      disabledAttr(currentPage >= totalPages ? "Last page" : "") +
+      ">Next</button>" +
+      "</div>" +
+      "</div>"
+    );
+  }
+
+  function renderActivitySection(campaignId) {
+    var allRows = buildActivityRows(campaignId);
+    var filteredRows = filterActivityRows(allRows);
+    var sortedRows = sortActivityRows(filteredRows);
+    var paged = paginateActivityRows(sortedRows);
+    var eventTypes = {};
+    allRows.forEach(function collect(row) {
+      eventTypes[row.eventType] = true;
+    });
+    var actionOptions = Object.keys(eventTypes).sort();
+    var sortArrow = state.ui.activitySortDir === "asc" ? "↑" : "↓";
+    var rowsHtml = paged.pageRows
+      .map(function row(item) {
+        return (
+          "<tr>" +
+          "<td><strong>" +
+          escapeHtml(item.name) +
+          "</strong></td>" +
+          "<td>" +
+          escapeHtml(item.email || "-") +
+          "</td>" +
+          "<td>" +
+          escapeHtml(item.lastAction) +
+          "</td>" +
+          '<td class="activity-message-cell" title="' +
+          escapeHtml(item.message) +
+          '">' +
+          escapeHtml(item.message) +
+          "</td>" +
+          "<td>" +
+          escapeHtml(item.stepLabel) +
+          "</td>" +
+          "<td>" +
+          escapeHtml(item.timeLabel) +
+          "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
+
+    var pageOptions = Array.from({ length: paged.totalPages }, function map(_, idx) {
+      var page = idx + 1;
+      return '<option value="' + page + '"' + (page === paged.currentPage ? " selected" : "") + ">" + page + "</option>";
+    }).join("");
+
+    return (
+      '<section class="panel stack activity-panel">' +
+      '<div class="panel-header"><div><h3>Step 4: Activity</h3><p class="helper">Audit log for campaign activity events.</p></div>' +
+      '<div class="activity-controls-inline"><label for="activity-filter" class="helper">Filter by</label>' +
+      '<select id="activity-filter" class="status-select" data-activity-filter><option value="all"' +
+      (state.ui.activityFilterAction === "all" ? " selected" : "") +
+      ">All Actions</option>" +
+      actionOptions
+        .map(function option(type) {
+          var selected = state.ui.activityFilterAction === type ? " selected" : "";
+          return '<option value="' + escapeHtml(type) + '"' + selected + ">" + escapeHtml(humanizeEventType(type)) + "</option>";
+        })
+        .join("") +
+      "</select></div></div>" +
+      '<div class="table-wrap"><table><thead><tr>' +
+      '<th><button class="activity-sort" type="button" data-action="set-activity-sort" data-sort-by="name">Name ' +
+      (state.ui.activitySortBy === "name" ? sortArrow : "") +
+      "</button></th>" +
+      "<th>Email</th>" +
+      '<th><button class="activity-sort" type="button" data-action="set-activity-sort" data-sort-by="lastAction">Last action ' +
+      (state.ui.activitySortBy === "lastAction" ? sortArrow : "") +
+      "</button></th>" +
+      '<th>Message</th>' +
+      '<th><button class="activity-sort" type="button" data-action="set-activity-sort" data-sort-by="step">Step ' +
+      (state.ui.activitySortBy === "step" ? sortArrow : "") +
+      "</button></th>" +
+      '<th><button class="activity-sort" type="button" data-action="set-activity-sort" data-sort-by="time">Time ' +
+      (state.ui.activitySortBy === "time" ? sortArrow : "") +
+      "</button></th>" +
+      "</tr></thead><tbody>" +
+      (rowsHtml || '<tr><td colspan="6" class="helper">No activity yet for this campaign.</td></tr>') +
+      "</tbody></table></div>" +
+      '<div class="activity-footer">' +
+      '<div class="activity-footer-left">' +
+      '<label for="activity-page-size" class="helper">Items per page</label>' +
+      '<select id="activity-page-size" class="status-select" data-activity-page-size>' +
+      (state.ui.activityPageSizeOptions || [25, 50, 100])
+        .map(function map(size) {
+          return '<option value="' + size + '"' + (Number(state.ui.activityPageSize) === Number(size) ? " selected" : "") + ">" + size + "</option>";
+        })
+        .join("") +
+      "</select>" +
+      '<span class="helper">' +
+      paged.startIndex +
+      "-" +
+      paged.endIndex +
+      " of " +
+      paged.totalItems +
+      " items</span></div>" +
+      '<div class="activity-footer-right">' +
+      '<button class="btn btn-secondary" type="button" data-action="activity-prev-page"' +
+      disabledAttr(paged.currentPage <= 1 ? "First page" : "") +
+      ">Prev</button>" +
+      '<select class="status-select" data-activity-page>' +
+      pageOptions +
+      "</select>" +
+      '<span class="helper">of ' +
+      paged.totalPages +
+      "</span>" +
+      '<button class="btn btn-secondary" type="button" data-action="activity-next-page"' +
+      disabledAttr(paged.currentPage >= paged.totalPages ? "Last page" : "") +
+      ">Next</button>" +
+      "</div></div>" +
+      "</section>"
+    );
   }
 
   function getSequenceStepsForCampaign(campaignId) {
@@ -3748,24 +4255,6 @@
       })
       .join("");
 
-    var recent = computeCampaignRecentEvents(campaignId, 12)
-      .map(function mapEvent(item) {
-        var contact = item.contactId ? getContact(item.contactId) : null;
-        var summary =
-          String(item.type).replace(/_/g, " ") +
-          " | " +
-          (contact ? contact.name : "system") +
-          " | Step " +
-          String(item.stepIndex || "-") +
-          " | " +
-          toLocaleLabel(item.timestamp);
-        if (item.type === "removed" && item.meta && item.meta.reason) {
-          summary += " | reason: " + item.meta.reason;
-        }
-        return '<div class="event-item">' + escapeHtml(summary) + "</div>";
-      })
-      .join("");
-
     return (
       '<section class="panel stack">' +
       '<div class="panel-header"><div><h3>KPI and Metrics</h3><p class="helper">Campaign-scoped metrics for the selected campaign.</p></div></div>' +
@@ -3803,17 +4292,18 @@
       '<div class="table-wrap"><table><thead><tr><th>Step</th><th>Sends</th><th>Replies</th><th>Response Rate</th></tr></thead><tbody>' +
       tableRows +
       "</tbody></table></div>" +
-      '<div class="events-list">' +
-      (recent || '<div class="helper">No events yet.</div>') +
-      "</div>" +
       "</section>"
     );
   }
 
-  function renderCampaignRegistrySection(selectedCampaignId) {
+  function renderCampaignRegistrySection(selectedCampaignId, options) {
+    var sectionOptions = options || {};
     var selectedCampaign = getCampaignById(selectedCampaignId);
     var isCollapsed = !!state.ui.isCampaignDirectoryCollapsed;
     var headerToggleLabel = isCollapsed ? "Expand" : "Collapse";
+    var headerTitle = sectionOptions.title || "All Campaigns";
+    var headerHelper = sectionOptions.helper || "Status shows every campaign in this mock session.";
+    var footerHtml = sectionOptions.footerHtml || "";
     var selectedSummary = selectedCampaign
       ? escapeHtml(selectedCampaign.name || selectedCampaign.id) +
         " • " +
@@ -3929,7 +4419,11 @@
       '<section class="panel stack campaign-directory' +
       (isCollapsed ? " is-collapsed" : "") +
       '">' +
-      '<div class="panel-header"><div><h2>All Campaigns</h2><p class="helper">Status shows every campaign in this mock session.</p></div><div class="campaign-directory-header-actions"><button class="btn btn-secondary" type="button" data-action="toggle-campaign-directory">' +
+      '<div class="panel-header"><div><h2>' +
+      escapeHtml(headerTitle) +
+      "</h2><p class=\"helper\">" +
+      escapeHtml(headerHelper) +
+      '</p></div><div class="campaign-directory-header-actions"><button class="btn btn-secondary" type="button" data-action="toggle-campaign-directory">' +
       headerToggleLabel +
       "</button></div></div>" +
       compactSummary +
@@ -3938,6 +4432,7 @@
         : '<div class="table-wrap"><table><thead><tr><th>Campaign</th><th>Status</th><th>Timezone</th><th>Send Window</th><th>Planned Start Date</th><th>Started At</th><th>View</th><th>Actions</th></tr></thead><tbody>' +
           rows +
           "</tbody></table></div>") +
+      footerHtml +
       "</section>"
     );
   }
@@ -3951,6 +4446,8 @@
     if (!state.ui.selectedStatusCampaignId || !getCampaignById(state.ui.selectedStatusCampaignId)) {
       state.ui.selectedStatusCampaignId = null;
       state.ui.statusJourneyStep = 1;
+      state.ui.isCampaignDirectoryCollapsed = false;
+      resetStatusJourneyVisited();
     }
 
     var selectedCampaignId = state.ui.selectedStatusCampaignId;
@@ -3962,37 +4459,35 @@
     var selectedCampaignOperationalStatus = selectedCampaign
       ? getOperationalStatus(selectedCampaign.status)
       : STATUS.STOPPED;
-    var selectedCampaignIsActive = selectedCampaignOperationalStatus === STATUS.ACTIVE;
-    var selectedCampaignIsStopped = selectedCampaignOperationalStatus === STATUS.STOPPED;
     var stepTotalLabel = viewingCurrentCampaign ? String(state.sequenceSteps.length) : "-";
-    var statusJourneyStep = Math.max(1, Math.min(3, Number(state.ui.statusJourneyStep || 1)));
+    var statusJourneyStep = Math.max(1, Math.min(4, Number(state.ui.statusJourneyStep || 1)));
+    if (!state.ui.statusJourneyVisited || typeof state.ui.statusJourneyVisited !== "object") {
+      resetStatusJourneyVisited();
+    }
+    state.ui.statusJourneyVisited[1] = true;
     state.ui.statusJourneyStep = statusJourneyStep;
 
     var campaignRegistrySection = renderCampaignRegistrySection(selectedCampaignId);
 
-    var statusCounts = { active: 0, stopped: 0, completed: 0 };
+    var statusCounts = { active: 0, stopped: 0 };
     var buckets = {
       all: selectedEnrollments.length,
       active: 0,
-      stopped: 0,
-      completed: 0
+      stopped: 0
     };
 
     selectedEnrollments.forEach(function count(enrollment) {
-      var displayStatus = getOperationalStatus(enrollment.status);
+      var displayStatus = getContactOperationalStatus(enrollment.status);
       if (displayStatus === STATUS.ACTIVE) {
         buckets.active += 1;
         statusCounts.active += 1;
       } else if (displayStatus === STATUS.STOPPED) {
         buckets.stopped += 1;
         statusCounts.stopped += 1;
-      } else if (displayStatus === STATUS.COMPLETED) {
-        buckets.completed += 1;
-        statusCounts.completed += 1;
       }
     });
 
-    var filterChips = ["all", "active", "stopped", "completed"]
+    var filterChips = ["all", "active", "stopped"]
       .map(function chip(filter) {
         var active = state.ui.statusFilter === filter;
         return (
@@ -4009,9 +4504,9 @@
       })
       .join("");
 
-    var rows = selectedEnrollments
+    var filteredRows = selectedEnrollments
       .filter(function filterRows(enrollment) {
-        var displayStatus = getOperationalStatus(enrollment.status);
+        var displayStatus = getContactOperationalStatus(enrollment.status);
         if (state.ui.statusFilter === "all") {
           return true;
         }
@@ -4021,20 +4516,15 @@
         if (state.ui.statusFilter === "stopped") {
           return displayStatus === STATUS.STOPPED;
         }
-        if (state.ui.statusFilter === "completed") {
-          return displayStatus === STATUS.COMPLETED;
-        }
         return true;
-      })
+      });
+    var hubPaged = paginateRows(filteredRows, state.ui.hubContactsPage, state.ui.hubContactsPageSize);
+    state.ui.hubContactsPage = hubPaged.currentPage;
+    var rows = hubPaged.pageRows
       .map(function row(enrollment) {
-        var displayStatus = getOperationalStatus(enrollment.status);
+        var displayStatus = getContactOperationalStatus(enrollment.status);
         var contact = getContact(enrollment.contactId);
         var canEditStatusRow = !!selectedCampaignId && enrollment.campaignId === selectedCampaignId;
-        var canOperateRow = manageMode && enrollment.campaignId === state.campaign.id;
-        var canSimulate =
-          canOperateRow && selectedCampaignIsActive && (enrollment.status === STATUS.ACTIVE || enrollment.status === STATUS.COMPLETED);
-        var canRemove = canOperateRow && selectedCampaignIsActive && enrollment.status === STATUS.ACTIVE;
-        var canReadd = canOperateRow && enrollment.status === STATUS.MANUALLY_REMOVED;
 
         var statusActions =
           canEditStatusRow
@@ -4055,60 +4545,11 @@
                   '<option value="STOPPED"' +
                   (displayStatus === STATUS.STOPPED ? " selected" : "") +
                   ">STOPPED</option>" +
-                  '<option value="COMPLETED"' +
-                  (displayStatus === STATUS.COMPLETED ? " selected" : "") +
-                  ">COMPLETED</option>" +
                   "</select>" +
                   "</div>"
                 );
               })()
             : '<p class="helper">No status actions.</p>';
-
-        var actions = '<p class="helper">Review mode (read-only).</p>';
-        if (canOperateRow) {
-          var campaignPauseMessage = selectedCampaignIsStopped
-            ? '<p class="helper">Campaign is stopped. Resume campaign to run sends or simulations.</p>'
-            : "";
-          var stoppedByCampaignMessage =
-            enrollment.status === STATUS.STOPPED && enrollment.stoppedByCampaign
-              ? '<p class="helper">Paused by campaign-level stop.</p>'
-              : "";
-          var safetyRowActions = "";
-          if (canRemove) {
-            safetyRowActions +=
-              '<button id="remove-btn-' +
-              enrollment.id +
-              '" class="btn btn-danger" type="button" data-action="open-remove-modal" data-enrollment-id="' +
-              enrollment.id +
-              '">Remove</button>';
-          }
-          if (canReadd) {
-            safetyRowActions +=
-              '<button class="btn btn-teal" type="button" data-action="readd-contact" data-enrollment-id="' +
-              enrollment.id +
-              '">Re-add</button>';
-          }
-          actions =
-            '<div class="contact-primary-actions contact-secondary-actions">' +
-            (safetyRowActions || '<p class="helper">No remove/re-add action for this contact.</p>') +
-            "</div>" +
-            '<details class="action-menu contact-action-menu">' +
-            "<summary>More Actions</summary>" +
-            '<div class="action-menu-content">' +
-            campaignPauseMessage +
-            stoppedByCampaignMessage +
-            (canSimulate
-              ? '<button class="btn btn-secondary" type="button" data-action="simulate-human" data-enrollment-id="' +
-                enrollment.id +
-                '">Simulate Human Reply</button>' +
-                '<button class="btn btn-secondary" type="button" data-action="simulate-ooo" data-enrollment-id="' +
-                enrollment.id +
-                '">Simulate OOO Reply</button>'
-              : '<p class="helper">Simulation unavailable for this status.</p>') +
-            '<p class="helper">Use status actions to update this contact only in the selected campaign.</p>' +
-            "</div>" +
-            "</details>";
-        }
 
         return (
           "<tr>" +
@@ -4143,13 +4584,20 @@
           "<td>" +
           statusActions +
           "</td>" +
-          "<td>" +
-          actions +
-          "</td>" +
           "</tr>"
         );
       })
       .join("");
+    var hubContactsPager = renderContactsPager({
+      scope: "hub",
+      currentPage: hubPaged.currentPage,
+      totalPages: hubPaged.totalPages,
+      startIndex: hubPaged.startIndex,
+      endIndex: hubPaged.endIndex,
+      totalItems: hubPaged.totalItems,
+      pageSize: Number(state.ui.hubContactsPageSize || 25),
+      pageSizeOptions: state.ui.hubContactsPageSizeOptions || [25, 50, 100]
+    });
 
     var selectedCampaignBanner = selectedCampaign
       ? '<div class="alert">Selected campaign: <strong>' +
@@ -4159,49 +4607,74 @@
         ")</div>"
       : '<div class="alert">Step 1: Select a campaign to continue.</div>';
 
-    var rowContent = rows || '<tr><td colspan="7" class="helper">No contacts for this campaign/filter.</td></tr>';
+    var rowContent = rows || '<tr><td colspan="6" class="helper">No contacts for this campaign/filter.</td></tr>';
 
     var modeText = manageMode
-      ? "You can manage contact actions for the current campaign."
-      : "Read-only view. Switch to the current active campaign to manage contacts.";
+      ? "Use status actions to manage contacts for the current campaign."
+      : "Read-only view. Switch to the current active campaign to manage statuses.";
 
-    var journeyLabels = ["Select Campaign", "View Contacts", "Review KPIs"];
+    var journeyLabels = ["Select Campaign", "Review Contacts", "Review KPIs", "Activity"];
     var journeyStrip = journeyLabels
       .map(function mapStep(label, idx) {
         var number = idx + 1;
+        var chipReason = "";
+        if (number > 1 && !selectedCampaignId) {
+          chipReason = "Select a campaign first.";
+        } else if (number === 3 && !state.ui.statusJourneyVisited[2]) {
+          chipReason = "Complete Step 2 first.";
+        } else if (number === 4 && !state.ui.statusJourneyVisited[3]) {
+          chipReason = "Complete Step 3 first.";
+        }
         var klass = "filter-chip";
         if (number === statusJourneyStep) {
           klass += " is-active";
+        } else if (state.ui.statusJourneyVisited[number]) {
+          klass += " is-complete";
         }
-        if (number > 1 && !selectedCampaignId) {
+        if (chipReason) {
           klass += " is-disabled";
         }
-        return '<span class="' + klass + '">' + number + ". " + escapeHtml(label) + "</span>";
+        return (
+          '<button class="' +
+          klass +
+          '" type="button" data-action="status-go-step" data-step="' +
+          number +
+          '"' +
+          disabledAttr(chipReason) +
+          ">" +
+          number +
+          ". " +
+          escapeHtml(label) +
+          "</button>"
+        );
       })
       .join("");
 
-    var nextReason = !selectedCampaignId && statusJourneyStep < 3 ? "Select a campaign to continue." : "";
+    var backReason = statusJourneyStep === 1 ? "You are on the first step." : "";
+    var primaryLabel = statusJourneyStep === 4 ? "All Campaigns" : "Continue";
+    var primaryAction = statusJourneyStep === 4 ? "status-go-all-campaigns" : "status-next-step";
+    var primaryReason = !selectedCampaignId && statusJourneyStep < 4 ? "Select a campaign to continue." : "";
     var stepNav =
       '<div class="step-footer">' +
-      (statusJourneyStep > 1
-        ? '<button class="btn btn-secondary" type="button" data-action="status-prev-step">Back</button>'
-        : "") +
-      (statusJourneyStep < 3
-        ? '<button class="btn btn-primary" type="button" data-action="status-next-step"' +
-          disabledAttr(nextReason) +
-          ">Continue</button>"
-        : "") +
+      '<button class="btn btn-secondary" type="button" data-action="status-prev-step"' +
+      disabledAttr(backReason) +
+      ">Back</button>" +
+      '<button class="btn btn-primary" type="button" data-action="' +
+      primaryAction +
+      '"' +
+      disabledAttr(primaryReason) +
+      ">" +
+      escapeHtml(primaryLabel) +
+      "</button>" +
       "</div>" +
-      reasonHint(nextReason);
+      reasonHint(primaryReason || backReason);
 
     var collapsedSections = "";
-    var summarySection = "";
-    var contactsSection = "";
-    var kpiSection = "";
+    var activeStepSection = "";
 
     if (statusJourneyStep >= 2 && selectedCampaign) {
       collapsedSections +=
-        '<section class="panel stack">' +
+        '<section class="panel stack status-step-summary">' +
         '<div class="panel-header"><div><h3>Step 1 Complete</h3><p class="helper">Campaign selected and collapsed.</p></div><span class="badge badge-approved">Done</span></div>' +
         '<p class="helper"><strong>' +
         escapeHtml(selectedCampaign.name || selectedCampaign.id || "-") +
@@ -4213,24 +4686,9 @@
         "</section>";
     }
 
-    if (statusJourneyStep === 2 && selectedCampaign) {
-      contactsSection =
-        '<section class="panel stack">' +
-        '<div class="panel-header"><div><h3>Contact Management</h3><p class="helper">' +
-        escapeHtml(modeText) +
-        "</p></div></div>" +
-        '<div class="filter-row">' +
-        filterChips +
-        "</div>" +
-        '<div class="table-wrap"><table><thead><tr><th>Contact</th><th>Status</th><th>Current Step</th><th>Next Send</th><th>Thread</th><th>Status Actions</th><th>Actions</th></tr></thead><tbody>' +
-        rowContent +
-        "</tbody></table></div>" +
-        "</section>";
-    }
-
     if (statusJourneyStep >= 3 && selectedCampaign) {
       collapsedSections +=
-        '<section class="panel stack">' +
+        '<section class="panel stack status-step-summary">' +
         '<div class="panel-header"><div><h3>Step 2 Complete</h3><p class="helper">Contacts reviewed and collapsed.</p></div><span class="badge badge-approved">Done</span></div>' +
         '<div class="filter-row">' +
         '<span class="timeline-chip">Contacts ' +
@@ -4242,33 +4700,76 @@
         '<span class="timeline-chip">Stopped ' +
         statusCounts.stopped +
         "</span>" +
-        '<span class="timeline-chip">Completed ' +
-        statusCounts.completed +
+        "</div>" +
+        "</section>";
+    }
+
+    if (statusJourneyStep >= 4 && selectedCampaign) {
+      var kpiSummary = computeCampaignMetrics(selectedCampaignId);
+      collapsedSections +=
+        '<section class="panel stack status-step-summary">' +
+        '<div class="panel-header"><div><h3>Step 3 Complete</h3><p class="helper">KPIs reviewed and collapsed.</p></div><span class="badge badge-approved">Done</span></div>' +
+        '<div class="filter-row">' +
+        '<span class="timeline-chip">Response ' +
+        escapeHtml(kpiSummary.responseRate) +
+        "</span>" +
+        '<span class="timeline-chip">Sent ' +
+        kpiSummary.sent +
+        "</span>" +
+        '<span class="timeline-chip">Replies ' +
+        kpiSummary.qualifyingReplies +
         "</span>" +
         "</div>" +
         "</section>";
-      kpiSection =
+    }
+
+    if (statusJourneyStep === 1) {
+      activeStepSection = renderCampaignRegistrySection(selectedCampaignId, {
+        title: "Step 1: Select Campaign",
+        helper: "Choose the campaign you want to inspect and manage.",
+        footerHtml: stepNav
+      });
+    } else if (statusJourneyStep === 2 && selectedCampaign) {
+      activeStepSection =
         '<section class="panel stack">' +
-        '<div class="panel-header"><div><h3>KPI Review</h3><p class="helper">Step 3: Review campaign KPI outcomes.</p></div></div>' +
+        '<div class="panel-header"><div><h3>Step 2: Review Contacts</h3><p class="helper">' +
+        escapeHtml(modeText) +
+        "</p></div></div>" +
+        '<div class="filter-row">' +
+        filterChips +
+        "</div>" +
+        '<div class="table-wrap"><table><thead><tr><th>Contact</th><th>Status</th><th>Current Step</th><th>Next Send</th><th>Thread</th><th>Status Actions</th></tr></thead><tbody>' +
+        rowContent +
+        "</tbody></table></div>" +
+        hubContactsPager +
+        stepNav +
+        "</section>";
+    } else if (statusJourneyStep === 3 && selectedCampaign) {
+      activeStepSection =
+        '<section class="panel stack">' +
+        '<div class="panel-header"><div><h3>Step 3: Review KPIs</h3><p class="helper">Review response rate, sends, and replies performance.</p></div></div>' +
         "</section>" +
-        renderKpiSection(selectedCampaignId);
+        renderKpiSection(selectedCampaignId) +
+        '<section class="panel stack">' +
+        stepNav +
+        "</section>";
+    } else if (statusJourneyStep === 4 && selectedCampaign) {
+      activeStepSection = renderActivitySection(selectedCampaignId) + '<section class="panel stack">' + stepNav + "</section>";
+    } else {
+      activeStepSection = campaignRegistrySection;
     }
 
     container.innerHTML =
       '<div class="stack status-shell">' +
-      campaignRegistrySection +
-      '<section class="panel stack">' +
-      '<div class="panel-header"><div><h2>Campaign Status Steps</h2><p class="helper">1. Select Campaign, 2. View Contacts, 3. Review KPIs.</p></div></div>' +
+      '<section class="panel stack status-steps-panel">' +
+      '<div class="panel-header"><div><h2>Campaigns Hub</h2><p class="helper">Follow the guided flow: select campaign, review contacts, review KPIs, then activity.</p></div></div>' +
       '<div class="filter-row">' +
       journeyStrip +
       "</div>" +
       selectedCampaignBanner +
-      stepNav +
       "</section>" +
       collapsedSections +
-      summarySection +
-      contactsSection +
-      kpiSection +
+      activeStepSection +
       "</div>";
   }
 
@@ -4378,7 +4879,7 @@
         "</strong> | Sequence steps: <strong>" +
         state.sequenceSteps.length +
         "</strong></div>" +
-        '<p class="helper">Once started, setup fields are locked and send-cycle actions move to Campaign Status.</p>' +
+        '<p class="helper">Once started, setup fields are locked and send-cycle actions move to Campaigns Hub.</p>' +
         '<div class="approval-actions">' +
         '<button class="btn btn-primary" type="button" data-action="confirm-start-campaign">Start Campaign</button>' +
         '<button class="btn btn-secondary" type="button" data-action="close-modal">Cancel</button>' +
@@ -4505,36 +5006,20 @@
               : ""
       });
     } else if (screen === "status") {
-      var statusStep = Math.max(1, Math.min(3, Number(state.ui.statusJourneyStep || 1)));
+      var statusStep = Math.max(1, Math.min(4, Number(state.ui.statusJourneyStep || 1)));
       var hasSelection = !!state.ui.selectedStatusCampaignId;
-      if (statusStep === 1) {
-        actions.push({
-          label: "Continue",
-          action: "status-next-step",
-          variant: "btn-primary",
-          reason: hasSelection ? "" : "Select a campaign first"
-        });
-      } else if (statusStep === 2) {
-        actions.push({
-          label: "Back",
-          action: "status-prev-step",
-          variant: "btn-secondary",
-          reason: ""
-        });
-        actions.push({
-          label: "KPIs",
-          action: "status-next-step",
-          variant: "btn-primary",
-          reason: hasSelection ? "" : "Select a campaign first"
-        });
-      } else {
-        actions.push({
-          label: "Back",
-          action: "status-prev-step",
-          variant: "btn-secondary",
-          reason: ""
-        });
-      }
+      actions.push({
+        label: "Back",
+        action: "status-prev-step",
+        variant: "btn-secondary",
+        reason: statusStep === 1 ? "You are on the first step." : ""
+      });
+      actions.push({
+        label: statusStep === 4 ? "All Campaigns" : "Continue",
+        action: statusStep === 4 ? "status-go-all-campaigns" : "status-next-step",
+        variant: "btn-primary",
+        reason: statusStep < 4 && !hasSelection ? "Select a campaign first" : ""
+      });
     }
 
     if (!actions.length) {

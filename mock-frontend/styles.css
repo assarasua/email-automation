@@ -848,6 +848,18 @@ textarea {
   border-color: #c5d4bd;
 }
 
+.filter-chip.is-complete {
+  background: #edf2e9;
+  color: #4e7132;
+  border-color: #cfd8c7;
+}
+
+.filter-chip:disabled,
+.filter-chip.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .inline-confirm {
   border: 1px dashed #cfd8c7;
   border-radius: 10px;
@@ -980,6 +992,93 @@ th {
 .status-shell {
   display: grid;
   gap: 1rem;
+}
+
+.status-steps-panel {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 5;
+}
+
+.status-step-summary {
+  border-style: dashed;
+}
+
+.activity-panel .panel-header {
+  align-items: flex-end;
+}
+
+.activity-controls-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.activity-controls-inline .status-select {
+  min-width: 220px;
+}
+
+.activity-sort {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  padding: 0;
+}
+
+.activity-message-cell {
+  max-width: 680px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-footer {
+  border: 1px solid #dce4d5;
+  border-radius: 10px;
+  background: #f8faf6;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.activity-footer-left,
+.activity-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.activity-footer .status-select {
+  min-width: 84px;
+}
+
+.contacts-pager {
+  border: 1px solid #dce4d5;
+  border-radius: 10px;
+  background: #f8faf6;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.contacts-pager-left,
+.contacts-pager-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.contacts-pager .status-select {
+  min-width: 84px;
 }
 
 .summary-strip {
