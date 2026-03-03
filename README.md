@@ -17,6 +17,64 @@ The UI currently exposes:
 4. Campaigns Hub wizard
 5. Campaigns Hub Step 4 Activity audit log
 
+## End-to-End Flows
+
+### Flow 1: Create campaign audience and setup
+1. User opens Audience Step 1 and filters/searches contacts.
+2. User selects eligible contacts.
+3. User continues to Audience Step 2 and sets campaign fields (name, timezone, window, start date).
+4. User continues to Sequence.
+
+Backend calls in this flow:
+- `GET /api/campaigns/{campaignId}/contacts?...` for table/filtering/pagination
+- `PUT /api/campaigns/{campaignId}/audience/selection`
+- `PATCH /api/campaigns/{campaignId}`
+
+### Flow 2: Build sequence
+1. User edits sequence steps (timing, subject/body, mode).
+2. User optionally generates personalized content for a step.
+3. User saves sequence and continues to approval.
+
+Backend calls in this flow:
+- `GET /api/campaigns/{campaignId}/sequence`
+- `PUT /api/campaigns/{campaignId}/sequence`
+- `POST /api/campaigns/{campaignId}/sequence/steps/{stepIndex}/generate`
+
+### Flow 3: Approve and start campaign
+1. User reviews approval summary and draft readiness.
+2. User confirms start.
+3. Campaign transitions to active lifecycle.
+
+Backend calls in this flow:
+- `GET /api/campaigns/{campaignId}/drafts`
+- `POST /api/campaigns/{campaignId}/approve-and-start`
+
+### Flow 4: Operate campaign in Campaigns Hub wizard
+1. Step 1 Select Campaign: user picks campaign from list.
+2. Step 2 Review Contacts: user filters contacts and sets contact status (`ACTIVE` or `STOPPED`).
+3. Step 3 Review KPIs: user reviews campaign metrics.
+4. Step 4 Activity: user reviews audit-log events with filter/sort/pagination.
+
+Backend calls in this flow:
+- `GET /api/campaigns`
+- `GET /api/campaigns/{campaignId}/enrollments?status=...&page=...&pageSize=...`
+- `PATCH /api/campaigns/{campaignId}/enrollments/{enrollmentId}/status`
+- `PATCH /api/campaigns/{campaignId}/status`
+- `GET /api/campaigns/{campaignId}/metrics`
+- `GET /api/campaigns/{campaignId}/events?type=&sortBy=&sortDir=&page=&pageSize=...`
+
+### Flow 5: Contact safety and draft queue operations
+1. User removes, undoes removal, or re-adds contacts in campaign lifecycle.
+2. User approves/rejects/regenerates drafts (single or bulk due approvals).
+
+Backend calls in this flow:
+- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/remove`
+- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/undo-remove`
+- `POST /api/campaigns/{campaignId}/enrollments/{enrollmentId}/readd`
+- `POST /api/campaigns/{campaignId}/drafts/bulk-approve-due`
+- `PATCH /api/drafts/{draftId}`
+- `POST /api/drafts/{draftId}/regenerate`
+
 ## What Is Still Mocked (Must Move to Backend)
 
 All items below currently use in-memory state and must call backend APIs.
